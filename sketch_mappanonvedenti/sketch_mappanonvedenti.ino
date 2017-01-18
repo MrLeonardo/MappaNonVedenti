@@ -3,6 +3,7 @@
 
 #include <SD.h>
 #include <SPI.h>
+#include <Wire.h>
 
 #include <avr/wdt.h>
 
@@ -30,9 +31,13 @@ const int setVolume = 6;
 
 const int sdPin = 10;
 
-const int leakPin = 3;
-const int clockPin = 3;
-const int readButtonPin = 3;
+const int PCF_address_A0 = B0111000;
+const int PCF_address_A1 = B0111001;
+const int PCF_address_A2 = B0111010;
+const int PCF_address_A3 = B0111011;
+const int PCF_address_A4 = B0111100;
+
+int ArrayOfPCF_address[] = {B0111000, B0111001, B0111010, B0111011, B0111100};
 
 TMRpcm audio;
 
@@ -41,37 +46,44 @@ SdVolume volume;
 SdFile root;
 
 void setup() {
-
   wdt_enable(WDTO_8S);
-
   Serial.begin(9600);  
-
-  openSD();
-
+  Wire.begin();
+  openSD();  
   setAudio();
-
-  setPin();
 }
 
 void loop() {
-  int pin = 0; 
-  int pinForSet = 0;
+  int pin = 0;
+  int address;
+  int i = 0;
   
   if(!audio.isPlaying()) {
-    digitalWrite(leakPin, HIGH);
-    pin = readPin(30);
     
-    if (pin != 0) {
-      pinForSet = readPin(1);
-      
-      if(pinForSet != 0) {
-        //registerWav();
-      }
-      else {
-        Serial.println("pin read: " + String(pin));	
-        playAudio(pin);
+    Serial.println("not play");
+    
+    int numberOfAddress = (sizeof(ArrayOfPCF_address)/sizeof(int));
+    
+    for(i = 0; i < numberOfAddress && pin == 0; i++) {      
+      pin = readPin(ArrayOfPCF_address[i]);
+      address = ArrayOfPCF_address[i];
+    }    
+    
+    if(address == PCF_address_A4 && pin == 128) {
+      //recordAudio(address+"_"+pin);
+      Serial.println("record pin: " + String(pin));
+    }
+    else {
+      if(pin > 0) {
+        Serial.println("pin: " + String(pin) + " " + String(address));
+        //playAudio(String(address) + "_" + String(pin) + ".wav");
+        playAudio("60_1.wav");        
       }
     }
+      
+  }
+  else {
+    Serial.println("play");
   }
 
   wdt_reset();
@@ -88,12 +100,6 @@ void openSD() {
   Serial.println(" done.");
 }
 
-void setPin() {
-  pinMode(leakPin, OUTPUT);  
-  pinMode(clockPin, OUTPUT);
-  pinMode(readButtonPin, INPUT);
-}
-
 void setAudio() {
   audio.speakerPin = speakerPin;
   audio.setVolume(setVolume);
@@ -102,49 +108,35 @@ void setAudio() {
 // -------------------------------------
 
 // ------------- function --------------
-int readPin(int numberOfPin) {
-  int i;
-  int pin = 0;
-  int val = LOW;
-  
-  for(i = 1; i <= numberOfPin; i++) {
-    digitalWrite(clockPin, HIGH);
-    val = digitalRead(readButtonPin);
-    if (val == HIGH and pin == 0) {
-      pin = i;
-    }    
+byte readPin(int PCF_address) {
+  int n = 0;
+  Wire.requestFrom(PCF_address, 1);
+  while(Wire.available()) {    
+    n += (Wire.read());
   }
-  
-  return pin;
+  return ~n;
 }
 
-File readSDCard(String namefile) {
-  return SD.open(namefile.c_str(),FILE_READ);
+File readSDCard(String namefile) {  
+  return SD.open(namefile.c_str(), FILE_READ);;
 }
 
-void playAudio(int pin) {
+void playAudio(String filename) {
   File file;
-  String filename = "";
   char *buf;       //[BUFFER_SIZE_FILENAME];
-
-
-  /*
-  //Make the track an int to inc or dec and then convert that int to a string. 
-   //With the int now a string, use strcat() to make it look like "0002.wav".
-   track = 2;
-   char *StrTrack = itoa(track);
-   strcat(StrTrack,".wav"); // It should produce "0002.wav".
-   strcat(filename,".wav");
-   */
-
-  //filename = "pin" + String(pin) + ".wav";  
-  filename = "pin1.wav";
+  
+  filename = "60_1.wav";
   if((file = readSDCard(filename))) {
-    Serial.println("filename: " + filename);
+    Serial.println("file open: " + filename);
     file.close();
     filename.toCharArray(buf, filename.length());
-    audio.play(buf);
-    //audio.play("pin1.wav");
+    Serial.println("filename length: " + String(filename.length()));
+    
+    int i = 0;
+    for(i = 0; i < filename.length(); i++) {
+      buf[i] = filename[i];      
+    }
+    audio.play("60_1.WAV");
   } 
 }
 
