@@ -5,24 +5,11 @@
 #include <SPI.h>
 #include <Wire.h>
 
+#include <string.h>
+
 #include <avr/wdt.h>
 
 #include <TMRpcm.h>
-
-/*
-TMRpcm audio;
- audio.play("filename");    plays a file
- audio.play("filename",30); plays a file starting at 30 seconds into the track
- audio.speakerPin = 11;     set to 5,6,11 or 46 for Mega, 9 for Uno, Nano, etc.
- audio.disable();           disables the timer on output pin and stops the music
- audio.stopPlayback();      stops the music, but leaves the timer running
- audio.isPlaying();         returns 1 if music playing, 0 if not
- audio.pause();             pauses/unpauses playback
- audio.quality(1);          Set 1 for 2x oversampling
- audio.volume(0);           1(up) or 0(down) to control volume
- audio.setVolume(0);        0 to 7. Set volume level
- audio.loop(1);             0 or 1. Can be changed during playback for full control of looping. 
- */
 
 #define BUFFER_SIZE_FILENAME 30
 
@@ -39,11 +26,16 @@ const int PCF_address_A4 = B0111100;
 
 int ArrayOfPCF_address[] = {B0111000, B0111001, B0111010, B0111011, B0111100};
 
-TMRpcm audio;
+TMRpcm tmrpcm;
 
 Sd2Card card;
 SdVolume volume;
 SdFile root;
+
+struct WIRE {
+  int pin;    
+  int address;
+};
 
 void setup() {
   wdt_enable(WDTO_8S);
@@ -51,39 +43,25 @@ void setup() {
   Wire.begin();
   openSD();  
   setAudio();
+  tmrpcm.CSPin = sdPin;
 }
 
-void loop() {
-  int pin = 0;
-  int address;
-  int i = 0;
-  
-  if(!audio.isPlaying()) {
-    
-    Serial.println("not play");
-    
-    int numberOfAddress = (sizeof(ArrayOfPCF_address)/sizeof(int));
-    
-    for(i = 0; i < numberOfAddress && pin == 0; i++) {      
-      pin = readPin(ArrayOfPCF_address[i]);
-      address = ArrayOfPCF_address[i];
-    }    
-    
-    if(address == PCF_address_A4 && pin == 128) {
-      //recordAudio(address+"_"+pin);
-      Serial.println("record pin: " + String(pin));
+void loop() {  
+  if(!tmrpcm.isPlaying()) {        
+    WIRE wire = readFromAddress(true);    
+    if(wire.address == PCF_address_A4 && wire.pin == 128) {      
+      recordAudio();
     }
     else {
-      if(pin > 0) {
-        Serial.println("pin: " + String(pin) + " " + String(address));
-        //playAudio(String(address) + "_" + String(pin) + ".wav");
-        playAudio("60_1.wav");        
+      if(wire.pin > 0) {
+        Serial.println("play filename: " + String(wire.address) + "_" + String(wire.pin) + ".wav");
+        String str = String(wire.address) + "_" + String(wire.pin) + ".wav";
+        playAudio(str);        
       }
-    }
-      
+    }      
   }
   else {
-    Serial.println("play");
+    //Serial.println("play");
   }
 
   wdt_reset();
@@ -101,8 +79,8 @@ void openSD() {
 }
 
 void setAudio() {
-  audio.speakerPin = speakerPin;
-  audio.setVolume(setVolume);
+  tmrpcm.speakerPin = speakerPin;
+  //tmrpcm.setVolume(setVolume);
 }
 
 // -------------------------------------
@@ -117,29 +95,64 @@ byte readPin(int PCF_address) {
   return ~n;
 }
 
-File readSDCard(String namefile) {  
-  return SD.open(namefile.c_str(), FILE_READ);;
+File readSDCard(char* namefile) {  
+  return SD.open(namefile, FILE_READ);;
 }
 
-void playAudio(String filename) {
-  File file;
-  char *buf;       //[BUFFER_SIZE_FILENAME];
+struct WIRE readFromAddress(boolean all) {
+  WIRE wire;
+  int i = 0;
   
-  filename = "60_1.wav";
-  if((file = readSDCard(filename))) {
-    Serial.println("file open: " + filename);
-    file.close();
-    filename.toCharArray(buf, filename.length());
-    Serial.println("filename length: " + String(filename.length()));
+  wire.pin = 0;
+  wire.address = 0;
+  
+  int numberOfAddress = (sizeof(ArrayOfPCF_address)/sizeof(int));
+  
+  if(!all)
+    numberOfAddress -= 1;
     
-    int i = 0;
-    for(i = 0; i < filename.length(); i++) {
-      buf[i] = filename[i];      
-    }
-    audio.play("60_1.WAV");
-  } 
+  for(i = 0; i < numberOfAddress && wire.pin == 0; i++) {      
+    wire.pin = readPin(ArrayOfPCF_address[i]);
+    wire.address = ArrayOfPCF_address[i];
+  }
+  
+  if(wire.pin == 0)
+    wire.address = 0;
+  
+  return (wire);
 }
 
+void playAudio(String &filename) {
+  char* buf = (char*)filename.c_str();
+  tmrpcm.play(buf);
+}
+
+void recordAudio() {  
+  while (readPin(PCF_address_A4) == 128) {
+    WIRE wire = readFromAddress(false);
+    
+    Serial.println("record pin: " + String(wire.pin));
+    
+    if(wire.pin > 0) {
+      String filename = String(wire.address) + "_" + String(wire.pin) + ".wav";
+      Serial.println("record filename: " + filename);    
+      char* buf = (char*)filename.c_str();
+      tmrpcm.startRecording(buf,16000, A0);  
+     
+      int pin = wire.pin;
+    
+      while(pin == wire.pin) {
+        wire = readFromAddress(false);
+        wdt_reset();
+      } 
+      
+      Serial.println("stop");
+      tmrpcm.stopRecording(buf); 
+    }
+    
+    wdt_reset();
+  }
+}
 // ------------------------------------
 
 
